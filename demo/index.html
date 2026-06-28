@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0f12;
+    --fg: #f4f4f5;
+    --muted: rgba(244,244,245,0.5);
+    --accent: #6ea8ff;
+    --line: rgba(255,255,255,0.1);
+    --surface: rgba(255,255,255,0.04);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* Progress bar */
+  #progress-track { height: 3px; background: var(--line); flex-shrink: 0; }
+  #progress-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
+
+  /* Header */
+  header {
+    flex-shrink: 0;
+    padding: 1rem 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .tag {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: rgba(110,168,255,0.15);
+    color: var(--accent);
+  }
+  header a {
+    margin-left: auto;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  header a:hover { opacity: 0.8; }
+
+  /* Slide area */
+  main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem 1rem;
+    gap: 1.25rem;
+  }
+
+  #slide-image-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: 1080px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  #slide-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  #slide-caption {
+    width: 100%;
+    max-width: 1080px;
+    text-align: center;
+  }
+  #slide-caption p {
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+  #slide-caption small {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  /* Footer */
+  footer {
+    flex-shrink: 0;
+    padding: 0.875rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    border-top: 1px solid var(--line);
+  }
+  button {
+    padding: 0.4rem 1.1rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: transparent;
+    color: var(--fg);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.75; }
+  button:disabled { opacity: 0.3; cursor: default; }
+  #counter { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="progress-track"><div id="progress-fill"></div></div>
+
+  <header>
+    <h1 id="hd-title"></h1>
+    <div class="tags" id="hd-tags"></div>
+    <a id="hd-github" href="#" target="_blank" rel="noopener noreferrer" style="display:none">GitHub ↗</a>
+  </header>
+
+  <main>
+    <div id="slide-image-wrap">
+      <img id="slide-img" src="" alt="">
+    </div>
+    <div id="slide-caption">
+      <p id="caption-text"></p>
+      <small id="caption-sub"></small>
+    </div>
+  </main>
+
+  <footer>
+    <button id="btn-prev" aria-label="Previous slide">← Prev</button>
+    <span id="counter"></span>
+    <button id="btn-next" aria-label="Next slide">Next →</button>
+  </footer>
+</div>
+
+<script>
+const SLIDES = {
+  "title": "n8n AI Video Pipeline with WhatsApp Approval Gates",
+  "tags": [
+    "n8n",
+    "Claude API",
+    "HeyGen",
+    "ElevenLabs",
+    "WhatsApp Business API",
+    "Blotato",
+    "Google Drive"
+  ],
+  "github": "https://github.com/chunhuduc/n8n-ai-video-pipeline-whatsapp-blotato",
+  "slides": [
+    {
+      "image": "step-01.png",
+      "caption": "Daily Script Generation",
+      "sub": "Morning cron fires in n8n → Claude API generates platform-optimized script (TikTok hook, Reels body, CTA) from brand guidelines and rotating content schedule"
+    },
+    {
+      "image": "step-02.png",
+      "caption": "WhatsApp Script Approval Gate",
+      "sub": "Script delivered as WhatsApp Business API interactive message — owner taps Approve, Reject, or sends text revision notes which loop back to Claude for automated re-draft"
+    },
+    {
+      "image": "step-03.png",
+      "caption": "HeyGen Avatar Render + ElevenLabs Voice",
+      "sub": "Approved script triggers HeyGen API with owner's Avatar ID and ElevenLabs Voice ID — n8n polls render status every 15 s until video URL is ready"
+    },
+    {
+      "image": "step-04.png",
+      "caption": "Google Drive B-roll Scan + AI Gap Fill",
+      "sub": "n8n scans Drive asset library by script B-roll tags — matched clips are pulled directly, missing segments are generated via AI video API and assembled into a complete draft"
+    },
+    {
+      "image": "step-05.png",
+      "caption": "WhatsApp Video Approval Gate",
+      "sub": "Draft video URL sent to owner via WhatsApp — Approve & Post routes to publish, revision notes route back to assembly for automated re-render. Nothing posts without sign-off."
+    },
+    {
+      "image": "step-06.png",
+      "caption": "Blotato Multi-Platform Publish + Drive Write-Back",
+      "sub": "Single Blotato API call publishes simultaneously to TikTok, Reels, Shorts, and Facebook — published video auto-saved to Completed Assets folder so the content library compounds daily"
+    }
+  ]
+} null;
+
+let idx = 0;
+const total = SLIDES.slides.length;
+
+// populate static header
+document.getElementById('hd-title').textContent = SLIDES.title;
+const tagsEl = document.getElementById('hd-tags');
+(SLIDES.tags || []).forEach(t => {
+  const s = document.createElement('span');
+  s.className = 'tag';
+  s.textContent = t;
+  tagsEl.appendChild(s);
+});
+if (SLIDES.github) {
+  const a = document.getElementById('hd-github');
+  a.href = SLIDES.github;
+  a.style.display = '';
+}
+
+function render() {
+  const slide = SLIDES.slides[idx];
+  document.getElementById('slide-img').src = slide.image;
+  document.getElementById('slide-img').alt = slide.caption;
+  document.getElementById('caption-text').textContent = slide.caption;
+  const sub = document.getElementById('caption-sub');
+  sub.textContent = slide.sub || '';
+  sub.style.display = slide.sub ? '' : 'none';
+  document.getElementById('counter').textContent = `${idx + 1} / ${total}`;
+  const pct = total > 1 ? ((idx + 1) / total) * 100 : 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('btn-prev').disabled = total <= 1;
+  document.getElementById('btn-next').disabled = total <= 1;
+}
+
+function go(n) { idx = ((n % total) + total) % total; render(); }
+
+document.getElementById('btn-prev').onclick = () => go(idx - 1);
+document.getElementById('btn-next').onclick = () => go(idx + 1);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') go(idx - 1);
+  else if (e.key === 'ArrowRight') go(idx + 1);
+});
+
+let tx = null;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+document.addEventListener('touchend', e => {
+  if (tx === null) return;
+  const dx = e.changedTouches[0].clientX - tx;
+  tx = null;
+  if (Math.abs(dx) < 40) return;
+  go(dx < 0 ? idx + 1 : idx - 1);
+});
+
+render();
+</script>
+</body>
+</html>

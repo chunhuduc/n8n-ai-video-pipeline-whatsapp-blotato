@@ -1,0 +1,191 @@
+{
+  "name": "Milestone 2 — Video Assembly + WhatsApp Video Gate",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook — Script Approved",
+      "type": "n8n-nodes-base.webhook",
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "script-approved",
+        "responseMode": "immediately"
+      },
+      "notes": "Called by Milestone 1 when owner approves. Receives approved script JSON."
+    },
+    {
+      "id": "heygen-render",
+      "name": "HeyGen — Render Avatar Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [200, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.heygen.com/v2/video/generate",
+        "headers": {
+          "X-Api-Key": "={{ $env.HEYGEN_API_KEY }}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "video_inputs": [{
+            "character": { "type": "avatar", "avatar_id": "={{ $env.HEYGEN_AVATAR_ID }}", "avatar_style": "normal" },
+            "voice": { "type": "text", "input_text": "={{ $json.hook }} {{ $json.body }} {{ $json.cta }}", "voice_id": "={{ $env.ELEVENLABS_VOICE_ID }}" },
+            "background": { "type": "color", "value": "#000000" }
+          }],
+          "dimension": { "width": 1080, "height": 1920 },
+          "aspect_ratio": "9:16",
+          "test": false
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Set HEYGEN_API_KEY, HEYGEN_AVATAR_ID, ELEVENLABS_VOICE_ID in n8n Credentials."
+    },
+    {
+      "id": "poll-heygen",
+      "name": "Poll HeyGen Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.heygen.com/v1/video_status.get?video_id={{ $node['HeyGen — Render Avatar Video'].json.data.video_id }}",
+        "headers": { "X-Api-Key": "={{ $env.HEYGEN_API_KEY }}" }
+      }
+    },
+    {
+      "id": "wait-render",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "position": [600, 100],
+      "parameters": { "amount": 15, "unit": "seconds" }
+    },
+    {
+      "id": "check-render-done",
+      "name": "Render Complete?",
+      "type": "n8n-nodes-base.if",
+      "position": [600, 0],
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.data.status }}", "operation": "equal", "value2": "completed" }] }
+      }
+    },
+    {
+      "id": "drive-scan",
+      "name": "Google Drive — Scan B-roll",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q=name+contains+'{{ $node['Webhook — Script Approved'].json.broll_tags[0] }}'+and+'{{ $env.GOOGLE_DRIVE_FOLDER_ID }}'+in+parents&fields=files(id,name,webContentLink)",
+        "headers": { "Authorization": "=Bearer {{ $env.GOOGLE_DRIVE_ACCESS_TOKEN }}" }
+      },
+      "notes": "Scans asset library folder by first broll_tag. Extend with Code node to loop all tags."
+    },
+    {
+      "id": "gap-fill-check",
+      "name": "Gaps to Fill?",
+      "type": "n8n-nodes-base.if",
+      "position": [1000, 0],
+      "parameters": {
+        "conditions": { "number": [{ "value1": "={{ $json.files.length }}", "operation": "smaller", "value2": "={{ $node['Webhook — Script Approved'].json.broll_tags.length }}" }] }
+      }
+    },
+    {
+      "id": "ai-gap-fill",
+      "name": "AI Gap Fill — Generate Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1200, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.runway.ml/v1/image_to_video",
+        "headers": { "Authorization": "=Bearer {{ $env.RUNWAY_API_KEY }}", "Content-Type": "application/json" },
+        "body": {
+          "prompt": "=Product video for {{ $node['Webhook — Script Approved'].json.broll_tags.join(', ') }}. Professional DTC e-commerce style, clean background.",
+          "duration": 4
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Swap for Pika or Kling API if preferred. Prompt is built from missing broll_tags."
+    },
+    {
+      "id": "whatsapp-send-video",
+      "name": "WhatsApp — Send Draft Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1400, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "headers": {
+          "Authorization": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "={{ $env.OWNER_PHONE_NUMBER }}",
+          "type": "interactive",
+          "interactive": {
+            "type": "button",
+            "header": { "type": "video", "video": { "link": "={{ $node['Poll HeyGen Status'].json.data.video_url }}" } },
+            "body": { "text": "🎬 *Draft Video Ready*\n\nDuration: ~45s · Format: 9:16\nPlatforms: TikTok · Reels · Shorts\n\nReview and approve to publish to all platforms simultaneously." },
+            "action": {
+              "buttons": [
+                { "type": "reply", "reply": { "id": "approve_post", "title": "✅ Approve & Post" } },
+                { "type": "reply", "reply": { "id": "reject_video", "title": "✏️ Reject & Revise" } }
+              ]
+            }
+          }
+        },
+        "bodyContentType": "json"
+      }
+    },
+    {
+      "id": "whatsapp-webhook-video",
+      "name": "WhatsApp Webhook — Video Gate",
+      "type": "n8n-nodes-base.webhook",
+      "position": [1600, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-gate-2",
+        "responseMode": "immediately"
+      }
+    },
+    {
+      "id": "switch-video-reply",
+      "name": "Switch — Video Reply",
+      "type": "n8n-nodes-base.switch",
+      "position": [1800, 0],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.interactive?.button_reply?.id ?? 'freetext' }}",
+        "rules": {
+          "rules": [
+            { "value2": "approve_post", "output": 0 },
+            { "value2": "reject_video", "output": 1 }
+          ]
+        },
+        "fallbackOutput": 1
+      }
+    },
+    {
+      "id": "set-video-approved",
+      "name": "Set Video URL",
+      "type": "n8n-nodes-base.set",
+      "position": [2000, -100],
+      "parameters": {
+        "values": { "string": [{ "name": "approved_video_url", "value": "={{ $node['Poll HeyGen Status'].json.data.video_url }}" }] }
+      },
+      "notes": "Approved — pass video_url to Milestone 3 trigger."
+    }
+  ],
+  "connections": {
+    "Webhook — Script Approved": { "main": [[{ "node": "HeyGen — Render Avatar Video", "type": "main", "index": 0 }]] },
+    "HeyGen — Render Avatar Video": { "main": [[{ "node": "Poll HeyGen Status", "type": "main", "index": 0 }]] },
+    "Poll HeyGen Status": { "main": [[{ "node": "Render Complete?", "type": "main", "index": 0 }]] },
+    "Render Complete?": { "main": [[{ "node": "Google Drive — Scan B-roll", "type": "main", "index": 0 }], [{ "node": "Wait 15s", "type": "main", "index": 0 }]] },
+    "Wait 15s": { "main": [[{ "node": "Poll HeyGen Status", "type": "main", "index": 0 }]] },
+    "Google Drive — Scan B-roll": { "main": [[{ "node": "Gaps to Fill?", "type": "main", "index": 0 }]] },
+    "Gaps to Fill?": { "main": [[{ "node": "WhatsApp — Send Draft Video", "type": "main", "index": 0 }], [{ "node": "AI Gap Fill — Generate Video", "type": "main", "index": 0 }]] },
+    "AI Gap Fill — Generate Video": { "main": [[{ "node": "WhatsApp — Send Draft Video", "type": "main", "index": 0 }]] },
+    "WhatsApp — Send Draft Video": { "main": [[{ "node": "WhatsApp Webhook — Video Gate", "type": "main", "index": 0 }]] },
+    "WhatsApp Webhook — Video Gate": { "main": [[{ "node": "Switch — Video Reply", "type": "main", "index": 0 }]] },
+    "Switch — Video Reply": { "main": [[{ "node": "Set Video URL", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

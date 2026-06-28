@@ -1,0 +1,167 @@
+{
+  "name": "Milestone 1 — Daily Script Generation + WhatsApp Gate",
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [0, 0],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * *" }] }
+      },
+      "notes": "Fires daily at 07:00 UTC. Adjust timezone offset in n8n settings."
+    },
+    {
+      "id": "get-schedule",
+      "name": "Get Rotating Schedule",
+      "type": "n8n-nodes-base.set",
+      "position": [200, 0],
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "content_theme", "value": "={{ ['product_demo','testimonial','how_to','behind_scenes','offer'][new Date().getDay() % 5] }}" },
+            { "name": "brand_guidelines", "value": "Your brand voice: conversational, energetic, DTC-focused. Always open with a problem or hook. CTA: link in bio." },
+            { "name": "target_platforms", "value": "TikTok, Instagram Reels, YouTube Shorts" }
+          ]
+        }
+      },
+      "notes": "Rotates content themes Mon-Fri. Swap in your actual brand guidelines here."
+    },
+    {
+      "id": "claude-generate-script",
+      "name": "Claude — Generate Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "x-api-key": "={{ $env.ANTHROPIC_API_KEY }}",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": "claude-sonnet-4-6",
+          "max_tokens": 1024,
+          "system": "You are a video script writer for a DTC e-commerce brand. Brand guidelines: {{ $node['Get Rotating Schedule'].json.brand_guidelines }}. Write scripts optimized for {{ $node['Get Rotating Schedule'].json.target_platforms }}.",
+          "messages": [{ "role": "user", "content": "Write a 45-second video script for today's theme: {{ $node['Get Rotating Schedule'].json.content_theme }}. Structure: HOOK (0-3s, grab attention immediately), BODY (3-35s, deliver value with B-roll cues in [brackets]), CTA (35-45s). Output JSON: { hook, body, cta, broll_tags: [], caption, duration_seconds }." }]
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Replace ANTHROPIC_API_KEY in n8n Credentials. Model can be swapped to gpt-4o."
+    },
+    {
+      "id": "parse-script",
+      "name": "Parse Script JSON",
+      "type": "n8n-nodes-base.code",
+      "position": [600, 0],
+      "parameters": {
+        "jsCode": "const content = $input.first().json.content[0].text;\nconst script = JSON.parse(content);\nreturn [{ json: { ...script, generated_at: new Date().toISOString(), theme: $node['Get Rotating Schedule'].json.content_theme } }];"
+      }
+    },
+    {
+      "id": "whatsapp-send-script",
+      "name": "WhatsApp — Send Script for Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "headers": {
+          "Authorization": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "={{ $env.OWNER_PHONE_NUMBER }}",
+          "type": "interactive",
+          "interactive": {
+            "type": "button",
+            "body": { "text": "📋 *Daily Script Ready*\n\nTheme: {{ $node['Parse Script JSON'].json.theme }}\nPlatforms: TikTok · Reels · Shorts\n\n🎬 *HOOK:* {{ $node['Parse Script JSON'].json.hook }}\n\n📝 *BODY:* {{ $node['Parse Script JSON'].json.body }}\n\n✅ *CTA:* {{ $node['Parse Script JSON'].json.cta }}" },
+            "action": {
+              "buttons": [
+                { "type": "reply", "reply": { "id": "approve_script", "title": "✅ Approve Script" } },
+                { "type": "reply", "reply": { "id": "reject_script", "title": "❌ Reject — Redo" } }
+              ]
+            }
+          }
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, OWNER_PHONE_NUMBER in n8n env."
+    },
+    {
+      "id": "whatsapp-webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [1000, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-gate-1",
+        "responseMode": "immediately"
+      },
+      "notes": "Register this webhook URL in Meta Developer Console as your WhatsApp webhook."
+    },
+    {
+      "id": "switch-reply-type",
+      "name": "Switch — Reply Type",
+      "type": "n8n-nodes-base.switch",
+      "position": [1200, 0],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.interactive?.button_reply?.id ?? 'freetext' }}",
+        "rules": {
+          "rules": [
+            { "value2": "approve_script", "output": 0 },
+            { "value2": "reject_script", "output": 1 }
+          ]
+        },
+        "fallbackOutput": 2
+      }
+    },
+    {
+      "id": "approved-set",
+      "name": "Set Approved Script",
+      "type": "n8n-nodes-base.set",
+      "position": [1400, -100],
+      "parameters": {
+        "values": { "string": [{ "name": "approved_script_id", "value": "={{ $node['Parse Script JSON'].json.generated_at }}" }] }
+      },
+      "notes": "Approved — pass script data to Milestone 2 trigger."
+    },
+    {
+      "id": "claude-revise",
+      "name": "Claude — Revise Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1400, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "x-api-key": "={{ $env.ANTHROPIC_API_KEY }}",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": "claude-sonnet-4-6",
+          "max_tokens": 1024,
+          "system": "You are a video script writer for a DTC e-commerce brand.",
+          "messages": [
+            { "role": "assistant", "content": "={{ $node['Parse Script JSON'].json | JSON.stringify }}" },
+            { "role": "user", "content": "={{ $json.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body ?? 'Please revise the script and try again.' }}" }
+          ]
+        },
+        "bodyContentType": "json"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Get Rotating Schedule", "type": "main", "index": 0 }]] },
+    "Get Rotating Schedule": { "main": [[{ "node": "Claude — Generate Script", "type": "main", "index": 0 }]] },
+    "Claude — Generate Script": { "main": [[{ "node": "Parse Script JSON", "type": "main", "index": 0 }]] },
+    "Parse Script JSON": { "main": [[{ "node": "WhatsApp — Send Script for Approval", "type": "main", "index": 0 }]] },
+    "WhatsApp Webhook": { "main": [[{ "node": "Switch — Reply Type", "type": "main", "index": 0 }]] },
+    "Switch — Reply Type": { "main": [[{ "node": "Set Approved Script", "type": "main", "index": 0 }], [{ "node": "Claude — Revise Script", "type": "main", "index": 0 }], [{ "node": "Claude — Revise Script", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

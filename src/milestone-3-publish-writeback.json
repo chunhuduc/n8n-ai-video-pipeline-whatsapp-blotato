@@ -1,0 +1,110 @@
+{
+  "name": "Milestone 3 — Multi-Platform Publish + Drive Write-Back",
+  "nodes": [
+    {
+      "id": "webhook-video-approved",
+      "name": "Webhook — Video Approved",
+      "type": "n8n-nodes-base.webhook",
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "video-approved",
+        "responseMode": "immediately"
+      },
+      "notes": "Called by Milestone 2 when owner taps Approve & Post. Receives approved_video_url."
+    },
+    {
+      "id": "blotato-publish",
+      "name": "Blotato — Publish to All Platforms",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [200, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.blotato.com/v1/posts",
+        "headers": {
+          "Authorization": "=Bearer {{ $env.BLOTATO_API_KEY }}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "video_url": "={{ $json.approved_video_url }}",
+          "caption": "={{ $json.caption }}",
+          "platforms": ["tiktok", "instagram_reels", "youtube_shorts", "facebook_reels"],
+          "schedule": "immediate"
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Set BLOTATO_API_KEY in n8n Credentials. Confirm exact platform slugs with Blotato docs."
+    },
+    {
+      "id": "check-publish-success",
+      "name": "All Platforms Published?",
+      "type": "n8n-nodes-base.if",
+      "position": [400, 0],
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.status }}", "operation": "equal", "value2": "success" }] }
+      }
+    },
+    {
+      "id": "drive-writeback",
+      "name": "Google Drive — Save to Completed Assets",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [600, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?uploadType=multipart",
+        "headers": { "Authorization": "=Bearer {{ $env.GOOGLE_DRIVE_ACCESS_TOKEN }}" },
+        "body": {
+          "name": "={{ new Date().toISOString().slice(0,10) }}-published.mp4",
+          "parents": ["={{ $env.GOOGLE_DRIVE_COMPLETED_FOLDER_ID }}"],
+          "copySource": "={{ $node['Webhook — Video Approved'].json.approved_video_url }}"
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "Set GOOGLE_DRIVE_COMPLETED_FOLDER_ID — the /Completed Assets folder ID from Drive."
+    },
+    {
+      "id": "error-notify",
+      "name": "Error — Notify Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [600, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "headers": {
+          "Authorization": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "={{ $env.OWNER_PHONE_NUMBER }}",
+          "type": "text",
+          "text": { "body": "⚠️ Publish failed on one or more platforms. Error: {{ $json.error ?? 'Unknown error' }}. Video URL preserved: {{ $node['Webhook — Video Approved'].json.approved_video_url }}" }
+        },
+        "bodyContentType": "json"
+      },
+      "notes": "No silent failures. Owner is notified immediately on any publish error."
+    },
+    {
+      "id": "success-log",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.set",
+      "position": [800, -100],
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "published_at", "value": "={{ new Date().toISOString() }}" },
+            { "name": "platforms", "value": "TikTok, Instagram Reels, YouTube Shorts, Facebook Reels" },
+            { "name": "video_url", "value": "={{ $node['Webhook — Video Approved'].json.approved_video_url }}" }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Video Approved": { "main": [[{ "node": "Blotato — Publish to All Platforms", "type": "main", "index": 0 }]] },
+    "Blotato — Publish to All Platforms": { "main": [[{ "node": "All Platforms Published?", "type": "main", "index": 0 }]] },
+    "All Platforms Published?": { "main": [[{ "node": "Google Drive — Save to Completed Assets", "type": "main", "index": 0 }], [{ "node": "Error — Notify Owner", "type": "main", "index": 0 }]] },
+    "Google Drive — Save to Completed Assets": { "main": [[{ "node": "Log Success", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
