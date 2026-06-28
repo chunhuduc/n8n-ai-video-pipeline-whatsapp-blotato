@@ -99,6 +99,8 @@
     border-radius: 8px;
     overflow: hidden;
     background: var(--surface);
+    /* allow transforms on child without clipping them */
+    touch-action: none;
   }
 
   #slide-img {
@@ -107,8 +109,34 @@
     object-fit: contain;
     display: block;
     transition: opacity 0.15s ease;
+    transform-origin: center center;
+    /* cursor hint that image is interactive on desktop */
+    cursor: zoom-in;
+    user-select: none;
+    -webkit-user-drag: none;
   }
   #slide-img.loading { opacity: 0; }
+  #slide-img.zoomed { cursor: zoom-out; }
+
+  /* Zoom hint badge — shown briefly on first load, touch devices only via JS */
+  #zoom-hint {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.65);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+  #zoom-hint.show { opacity: 1; }
 
   /* Spinner overlay */
   #img-spinner {
@@ -196,6 +224,7 @@
     <div id="slide-image-wrap">
       <img id="slide-img" src="" alt="">
       <div id="img-spinner"><div class="spinner-ring"></div></div>
+      <div id="zoom-hint">&#x1F50D; pinch to zoom</div>
     </div>
     <div id="slide-caption">
       <p id="caption-text"></p>
@@ -211,7 +240,51 @@
 </div>
 
 <script>
-const SLIDES = /* __SLIDES_DATA__ */null;
+const SLIDES = {
+  "title": "n8n AI Video Pipeline with WhatsApp Approval Gates",
+  "tags": [
+    "n8n",
+    "Claude API",
+    "HeyGen",
+    "ElevenLabs",
+    "WhatsApp Business API",
+    "Blotato",
+    "Google Drive"
+  ],
+  "github": "https://github.com/chunhuduc/n8n-ai-video-pipeline-whatsapp-blotato",
+  "slides": [
+    {
+      "image": "step-01.png",
+      "caption": "Daily Script Generation",
+      "sub": "Morning cron fires in n8n → Claude API generates platform-optimized script (TikTok hook, Reels body, CTA) from brand guidelines and rotating content schedule"
+    },
+    {
+      "image": "step-02.png",
+      "caption": "WhatsApp Script Approval Gate",
+      "sub": "Script delivered as WhatsApp Business API interactive message — owner taps Approve, Reject, or sends text revision notes which loop back to Claude for automated re-draft"
+    },
+    {
+      "image": "step-03.png",
+      "caption": "HeyGen Avatar Render + ElevenLabs Voice",
+      "sub": "Approved script triggers HeyGen API with owner's Avatar ID and ElevenLabs Voice ID — n8n polls render status every 15 s until video URL is ready"
+    },
+    {
+      "image": "step-04.png",
+      "caption": "Google Drive B-roll Scan + AI Gap Fill",
+      "sub": "n8n scans Drive asset library by script B-roll tags — matched clips are pulled directly, missing segments are generated via AI video API and assembled into a complete draft"
+    },
+    {
+      "image": "step-05.png",
+      "caption": "WhatsApp Video Approval Gate",
+      "sub": "Draft video URL sent to owner via WhatsApp — Approve & Post routes to publish, revision notes route back to assembly for automated re-render. Nothing posts without sign-off."
+    },
+    {
+      "image": "step-06.png",
+      "caption": "Blotato Multi-Platform Publish + Drive Write-Back",
+      "sub": "Single Blotato API call publishes simultaneously to TikTok, Reels, Shorts, and Facebook — published video auto-saved to Completed Assets folder so the content library compounds daily"
+    }
+  ]
+};
 
 let idx = 0;
 const total = SLIDES.slides.length;
@@ -233,7 +306,10 @@ if (SLIDES.github) {
 
 const imgEl = document.getElementById('slide-img');
 const spinner = document.getElementById('img-spinner');
+const wrap = document.getElementById('slide-image-wrap');
+const zoomHint = document.getElementById('zoom-hint');
 
+// ----- Loading spinner -----
 function showSpinner() {
   imgEl.classList.add('loading');
   spinner.classList.add('visible');
@@ -242,21 +318,175 @@ function hideSpinner() {
   imgEl.classList.remove('loading');
   spinner.classList.remove('visible');
 }
-
 imgEl.addEventListener('load', hideSpinner);
 imgEl.addEventListener('error', hideSpinner);
 
-// Preload all images in background after first render
+// ----- Zoom (pinch + double-tap / double-click) -----
+let scale = 1, tx = 0, ty = 0;
+let zoomHintShown = false;
+
+function applyTransform(animated) {
+  if (animated) imgEl.style.transition = 'transform 0.25s ease';
+  else imgEl.style.transition = '';
+  imgEl.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  imgEl.classList.toggle('zoomed', scale > 1);
+}
+
+function resetZoom(animated) {
+  scale = 1; tx = 0; ty = 0;
+  applyTransform(animated);
+}
+
+// Clamp pan so image never pans too far off screen
+function clampPan() {
+  const r = wrap.getBoundingClientRect();
+  const maxX = (r.width  * (scale - 1)) / 2;
+  const maxY = (r.height * (scale - 1)) / 2;
+  tx = Math.max(-maxX, Math.min(maxX, tx));
+  ty = Math.max(-maxY, Math.min(maxY, ty));
+}
+
+// Double-click to toggle zoom on desktop
+imgEl.addEventListener('dblclick', e => {
+  if (scale > 1) { resetZoom(true); return; }
+  const r = wrap.getBoundingClientRect();
+  const cx = e.clientX - r.left - r.width  / 2;
+  const cy = e.clientY - r.top  - r.height / 2;
+  scale = 2.5;
+  tx = -cx * (scale - 1) / scale;
+  ty = -cy * (scale - 1) / scale;
+  clampPan();
+  applyTransform(true);
+});
+
+// Pinch-to-zoom + drag on mobile
+let pt1 = null, pt2 = null;
+let startScale = 1, startTx = 0, startTy = 0;
+let startMidX = 0, startMidY = 0;
+let startDist = 0;
+let doubleTapTimer = null, lastTapTime = 0;
+
+function dist(a, b) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+function mid(a, b) {
+  return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+}
+
+wrap.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    // double-tap detection
+    const now = Date.now();
+    if (now - lastTapTime < 300) {
+      e.preventDefault();
+      if (scale > 1) { resetZoom(true); }
+      else {
+        const r = wrap.getBoundingClientRect();
+        const t = e.touches[0];
+        const cx = t.clientX - r.left - r.width  / 2;
+        const cy = t.clientY - r.top  - r.height / 2;
+        scale = 2.5;
+        tx = -cx * (scale - 1) / scale;
+        ty = -cy * (scale - 1) / scale;
+        clampPan();
+        applyTransform(true);
+      }
+      lastTapTime = 0;
+      return;
+    }
+    lastTapTime = now;
+    pt1 = e.touches[0];
+    pt2 = null;
+    startTx = tx; startTy = ty;
+  }
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    pt1 = e.touches[0]; pt2 = e.touches[1];
+    startScale = scale;
+    startTx = tx; startTy = ty;
+    startDist = dist(pt1, pt2);
+    const m = mid(pt1, pt2);
+    const r = wrap.getBoundingClientRect();
+    startMidX = m.x - r.left - r.width  / 2;
+    startMidY = m.y - r.top  - r.height / 2;
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchmove', e => {
+  if (e.touches.length === 2 && pt2) {
+    e.preventDefault();
+    const a = e.touches[0], b = e.touches[1];
+    const newDist = dist(a, b);
+    scale = Math.max(1, Math.min(5, startScale * newDist / startDist));
+    const m = mid(a, b);
+    const r = wrap.getBoundingClientRect();
+    const curMidX = m.x - r.left - r.width  / 2;
+    const curMidY = m.y - r.top  - r.height / 2;
+    tx = startTx + (curMidX - startMidX);
+    ty = startTy + (curMidY - startMidY);
+    clampPan();
+    applyTransform(false);
+  } else if (e.touches.length === 1 && scale > 1) {
+    // pan when zoomed
+    e.preventDefault();
+    const t = e.touches[0];
+    if (pt1) {
+      tx = startTx + (t.clientX - pt1.clientX);
+      ty = startTy + (t.clientY - pt1.clientY);
+      clampPan();
+      applyTransform(false);
+    }
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchend', e => {
+  if (e.touches.length < 2) pt2 = null;
+  if (e.touches.length === 0) {
+    pt1 = null;
+    if (scale < 1.05) resetZoom(true);
+  }
+});
+
+// When navigating slides, reset zoom
+function resetSlideZoom() { scale = 1; tx = 0; ty = 0; imgEl.style.transition = ''; imgEl.style.transform = ''; imgEl.classList.remove('zoomed'); }
+
+// Show zoom hint on touch devices, briefly
+function maybeShowZoomHint() {
+  if (zoomHintShown) return;
+  if (!('ontouchstart' in window)) return;
+  zoomHintShown = true;
+  zoomHint.classList.add('show');
+  setTimeout(() => { zoomHint.classList.remove('show'); }, 3000);
+}
+
+// ----- Slide navigation -----
+// Swipe only navigates when not zoomed
+let swipeTx = null;
+document.addEventListener('touchstart', e => {
+  if (scale > 1) return;
+  swipeTx = e.touches[0].clientX;
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  if (scale > 1 || swipeTx === null) return;
+  const dx = e.changedTouches[0].clientX - swipeTx;
+  swipeTx = null;
+  if (Math.abs(dx) < 50) return;
+  go(dx < 0 ? idx + 1 : idx - 1);
+});
+
 function preloadAll() {
   SLIDES.slides.forEach(s => { const i = new Image(); i.src = s.image; });
 }
 
 function render() {
+  resetSlideZoom();
   const slide = SLIDES.slides[idx];
-  if (!imgEl.complete || imgEl.naturalWidth === 0 || imgEl.src !== new URL(slide.image, location.href).href) {
+  const newSrc = slide.image;
+  const resolved = new URL(newSrc, location.href).href;
+  if (imgEl.src !== resolved || !imgEl.complete || imgEl.naturalWidth === 0) {
     showSpinner();
   }
-  imgEl.src = slide.image;
+  imgEl.src = newSrc;
   imgEl.alt = slide.caption;
   document.getElementById('caption-text').textContent = slide.caption;
   const sub = document.getElementById('caption-sub');
@@ -277,21 +507,11 @@ document.getElementById('btn-next').onclick = () => go(idx + 1);
 document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') go(idx - 1);
   else if (e.key === 'ArrowRight') go(idx + 1);
-});
-
-let tx = null;
-document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
-document.addEventListener('touchend', e => {
-  if (tx === null) return;
-  const dx = e.changedTouches[0].clientX - tx;
-  tx = null;
-  if (Math.abs(dx) < 40) return;
-  go(dx < 0 ? idx + 1 : idx - 1);
+  else if (e.key === 'Escape') resetZoom(true);
 });
 
 render();
-// Preload remaining images after a brief delay so first image gets priority
-setTimeout(preloadAll, 300);
+setTimeout(() => { preloadAll(); maybeShowZoomHint(); }, 400);
 </script>
 </body>
 </html>
