@@ -45,14 +45,38 @@
     background: rgba(110,168,255,0.15);
     color: var(--accent);
   }
-  header a {
+  .header-links {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+  }
+  header a {
     font-size: 0.85rem;
     font-weight: 500;
     color: var(--accent);
     text-decoration: none;
   }
   header a:hover { opacity: 0.8; }
+  .byline-link {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: color 0.2s;
+  }
+  .byline-link:hover { color: var(--fg); }
+  .byline-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
 
   /* Slide area */
   main {
@@ -82,7 +106,31 @@
     height: 100%;
     object-fit: contain;
     display: block;
+    transition: opacity 0.15s ease;
   }
+  #slide-img.loading { opacity: 0; }
+
+  /* Spinner overlay */
+  #img-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  #img-spinner.visible { opacity: 1; }
+  .spinner-ring {
+    width: 36px;
+    height: 36px;
+    border: 2.5px solid rgba(110,168,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   #slide-caption {
     width: 100%;
@@ -136,12 +184,18 @@
   <header>
     <h1 id="hd-title"></h1>
     <div class="tags" id="hd-tags"></div>
-    <a id="hd-github" href="#" target="_blank" rel="noopener noreferrer" style="display:none">GitHub ↗</a>
+    <div class="header-links">
+      <a id="hd-github" href="#" target="_blank" rel="noopener noreferrer" style="display:none">GitHub ↗</a>
+      <a class="byline-link" href="https://chunhuduc.com" target="_blank" rel="noopener noreferrer">
+        <span class="byline-dot"></span>chunhuduc.com
+      </a>
+    </div>
   </header>
 
   <main>
     <div id="slide-image-wrap">
       <img id="slide-img" src="" alt="">
+      <div id="img-spinner"><div class="spinner-ring"></div></div>
     </div>
     <div id="slide-caption">
       <p id="caption-text"></p>
@@ -157,51 +211,7 @@
 </div>
 
 <script>
-const SLIDES = {
-  "title": "n8n AI Video Pipeline with WhatsApp Approval Gates",
-  "tags": [
-    "n8n",
-    "Claude API",
-    "HeyGen",
-    "ElevenLabs",
-    "WhatsApp Business API",
-    "Blotato",
-    "Google Drive"
-  ],
-  "github": "https://github.com/chunhuduc/n8n-ai-video-pipeline-whatsapp-blotato",
-  "slides": [
-    {
-      "image": "step-01.png",
-      "caption": "Daily Script Generation",
-      "sub": "Morning cron fires in n8n → Claude API generates platform-optimized script (TikTok hook, Reels body, CTA) from brand guidelines and rotating content schedule"
-    },
-    {
-      "image": "step-02.png",
-      "caption": "WhatsApp Script Approval Gate",
-      "sub": "Script delivered as WhatsApp Business API interactive message — owner taps Approve, Reject, or sends text revision notes which loop back to Claude for automated re-draft"
-    },
-    {
-      "image": "step-03.png",
-      "caption": "HeyGen Avatar Render + ElevenLabs Voice",
-      "sub": "Approved script triggers HeyGen API with owner's Avatar ID and ElevenLabs Voice ID — n8n polls render status every 15 s until video URL is ready"
-    },
-    {
-      "image": "step-04.png",
-      "caption": "Google Drive B-roll Scan + AI Gap Fill",
-      "sub": "n8n scans Drive asset library by script B-roll tags — matched clips are pulled directly, missing segments are generated via AI video API and assembled into a complete draft"
-    },
-    {
-      "image": "step-05.png",
-      "caption": "WhatsApp Video Approval Gate",
-      "sub": "Draft video URL sent to owner via WhatsApp — Approve & Post routes to publish, revision notes route back to assembly for automated re-render. Nothing posts without sign-off."
-    },
-    {
-      "image": "step-06.png",
-      "caption": "Blotato Multi-Platform Publish + Drive Write-Back",
-      "sub": "Single Blotato API call publishes simultaneously to TikTok, Reels, Shorts, and Facebook — published video auto-saved to Completed Assets folder so the content library compounds daily"
-    }
-  ]
-};
+const SLIDES = /* __SLIDES_DATA__ */null;
 
 let idx = 0;
 const total = SLIDES.slides.length;
@@ -221,10 +231,33 @@ if (SLIDES.github) {
   a.style.display = '';
 }
 
+const imgEl = document.getElementById('slide-img');
+const spinner = document.getElementById('img-spinner');
+
+function showSpinner() {
+  imgEl.classList.add('loading');
+  spinner.classList.add('visible');
+}
+function hideSpinner() {
+  imgEl.classList.remove('loading');
+  spinner.classList.remove('visible');
+}
+
+imgEl.addEventListener('load', hideSpinner);
+imgEl.addEventListener('error', hideSpinner);
+
+// Preload all images in background after first render
+function preloadAll() {
+  SLIDES.slides.forEach(s => { const i = new Image(); i.src = s.image; });
+}
+
 function render() {
   const slide = SLIDES.slides[idx];
-  document.getElementById('slide-img').src = slide.image;
-  document.getElementById('slide-img').alt = slide.caption;
+  if (!imgEl.complete || imgEl.naturalWidth === 0 || imgEl.src !== new URL(slide.image, location.href).href) {
+    showSpinner();
+  }
+  imgEl.src = slide.image;
+  imgEl.alt = slide.caption;
   document.getElementById('caption-text').textContent = slide.caption;
   const sub = document.getElementById('caption-sub');
   sub.textContent = slide.sub || '';
@@ -257,6 +290,8 @@ document.addEventListener('touchend', e => {
 });
 
 render();
+// Preload remaining images after a brief delay so first image gets priority
+setTimeout(preloadAll, 300);
 </script>
 </body>
 </html>
